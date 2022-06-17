@@ -87,3 +87,10 @@ class CannotParseDDSOutputException(Exception):
     project.
     """
     pass
+
+
+class ForbiddenException(Exception):
+    """
+    Should be raised when something forbidden is attempted and should result in
+    the 403 response code.
+    """

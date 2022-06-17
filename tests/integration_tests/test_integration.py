@@ -1,5 +1,3 @@
-
-
 import json
 import sys
 import tempfile
@@ -7,9 +5,11 @@ import tempfile
 from tornado.testing import *
 
 from delivery.services.metadata_service import MetadataService
+from delivery.models.db_models import StagingStatus
 
 from tests.integration_tests.base import BaseIntegration
-from tests.test_utils import unorganised_runfolder
+from tests.test_utils import unorganised_runfolder, assert_eventually_equals
+
 
 class TestPythonVersion(unittest.TestCase):
     """
@@ -114,7 +114,9 @@ class TestIntegration(BaseIntegration):
         # Note that this is a test which skips delivery (since to_outbox is not
         # expected to be installed on the system where this runs)
 
-        with tempfile.TemporaryDirectory(dir='./tests/resources/runfolders/', prefix='160930_ST-E00216_0111_BH37CWALXX_') as tmp_dir:
+        with tempfile.TemporaryDirectory(
+                dir='./tests/resources/runfolders/',
+                prefix='160930_ST-E00216_0111_BH37CWALXX_') as tmp_dir:
 
             dir_name = os.path.basename(tmp_dir)
             self._create_projects_dir_with_random_data(tmp_dir)
@@ -129,14 +131,18 @@ class TestIntegration(BaseIntegration):
             self.assertEqual(response.code, 403)
 
             # Unless you force the delivery
-            response = self.fetch(url, method='POST', body=json.dumps({"force_delivery": True}))
+            response = self.fetch(
+                    url,
+                    method='POST',
+                    body=json.dumps({"force_delivery": True}))
             self.assertEqual(response.code, 202)
 
     def test_cannot_stage_the_same_project_twice(self):
         # Note that this is a test which skips delivery (since to_outbox is not
         # expected to be installed on the system where this runs)
 
-        with tempfile.TemporaryDirectory(dir='./tests/resources/projects') as tmp_dir:
+        with tempfile.TemporaryDirectory(
+                dir='./tests/resources/projects') as tmp_dir:
 
             # Stage once should work
             dir_name = os.path.basename(tmp_dir)
@@ -149,5 +155,92 @@ class TestIntegration(BaseIntegration):
             self.assertEqual(response.code, 403)
 
             # Unless you force the delivery
-            response = self.fetch(url, method='POST', body=json.dumps({"force_delivery": True}))
+            response = self.fetch(
+                    url,
+                    method='POST',
+                    body=json.dumps({"force_delivery": True}))
             self.assertEqual(response.code, 202)
+
+    def test_can_stage_raw_data(self):
+        with tempfile.TemporaryDirectory(
+                dir='./tests/resources/runfolders/',
+                prefix='160930_ST-E00216_0111_BH37CWALXX_') as tmp_dir1, \
+            tempfile.TemporaryDirectory(
+                dir='./tests/resources/runfolders/',
+                prefix='160930_ST-E00216_0111_BH37CWALXX_') as tmp_dir2:
+            proj_name = "AB-1234"
+
+            for tmp_dir in (tmp_dir1, tmp_dir2):
+                self._create_projects_dir_with_random_data(
+                        tmp_dir,
+                        proj_name=proj_name,
+                        )
+                self._create_checksums_file(tmp_dir)
+
+            url = "/".join([
+                self.API_BASE,
+                "stage", "project", "runfolders",
+                proj_name])
+            payload = {
+                    'include_bcl': True,
+                    'delivery_mode': 'CLEAN',
+                    }
+
+            response = self.fetch(
+                    url,
+                    method='POST',
+                    body=json.dumps(payload))
+            self.assertEqual(response.code, 202)
+
+            response_json = json.loads(response.body)
+            project, staging_id = next(iter(
+                response_json["staging_order_ids"].items()))
+
+            _, link = next(iter(
+                response_json["staging_order_links"].items()))
+
+            def get_response():
+                status_response = self.fetch(link)
+                self.assertEqual(status_response.code, 200)
+                return json.loads(status_response.body)["status"]
+
+            assert_eventually_equals(
+                    self,
+                    1,
+                    get_response,
+                    StagingStatus.staging_successful.name)
+
+            for tmp_dir in (tmp_dir1, tmp_dir2):
+                self.assertTrue(os.path.exists(
+                    os.path.join(
+                        "/tmp", str(staging_id), project,
+                        os.path.basename(tmp_dir),
+                        "Raw_Data", "L001", "test_data_L1.bcl")))
+
+    def test_no_raw_data_if_lane_shared(self):
+        with tempfile.TemporaryDirectory(
+                dir='./tests/resources/runfolders/',
+                prefix='160930_ST-E00216_0111_BH37CWALXX_') as tmp_dir:
+            proj_name = "AB-1234"
+
+            self._create_projects_dir_with_random_data(
+                    tmp_dir,
+                    proj_name=proj_name,
+                    share_lane=True,
+                    )
+            self._create_checksums_file(tmp_dir)
+
+            url = "/".join([
+                self.API_BASE,
+                "stage", "project", "runfolders",
+                proj_name])
+            payload = {
+                    'include_bcl': True,
+                    'delivery_mode': 'CLEAN',
+                    }
+
+            response = self.fetch(
+                    url,
+                    method='POST',
+                    body=json.dumps(payload))
+            self.assertEqual(response.code, 403)

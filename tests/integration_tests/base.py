@@ -1,4 +1,5 @@
 import os
+import csv
 import json
 import mock
 import random
@@ -29,11 +30,43 @@ class BaseIntegration(AsyncHTTPTestCase):
         # Default duration of mock delivery
         self.mock_duration = 0.1
 
-    def _create_projects_dir_with_random_data(self, base_dir, proj_name='ABC_123'):
+    def _create_projects_dir_with_random_data(
+            self,
+            base_dir,
+            proj_name='ABC_123',
+            share_lane=False,
+            ):
         tmp_proj_dir = os.path.join(base_dir, 'Projects', proj_name)
         os.makedirs(tmp_proj_dir)
         with open(os.path.join(tmp_proj_dir, 'test_file'), 'wb') as f:
             f.write(os.urandom(1024))
+
+        N_LANES = 2
+        with open(os.path.join(base_dir, "SampleSheet.csv"), 'w') as f:
+            f.write("[Data],,,,,\n")
+            fieldnames = [
+                    "Lane",
+                    "Sample_ID", "Sample_Name", "Sample_Project",
+                    "Index_ID", "index", "index2"]
+            csvwriter = csv.DictWriter(f, fieldnames=fieldnames)
+            csvwriter.writeheader()
+            csvwriter.writerow({"Lane": 1, "Sample_Project": proj_name})
+            csvwriter.writerow({"Lane": 2, "Sample_Project": "XYZ_456"})
+
+            if share_lane:
+                csvwriter.writerow({
+                    "Lane": 2, "Sample_Project": proj_name})
+
+        for lane in range(1, N_LANES + 1):
+            tmp_data_dir = os.path.join(
+                    base_dir,
+                    "Data", "Intensities", "BaseCalls",
+                    f"L{lane:03d}")
+            os.makedirs(tmp_data_dir)
+            with open(
+                    os.path.join(tmp_data_dir, f'test_data_L{lane}.bcl'),
+                    'wb') as f:
+                f.write(os.urandom(16))
 
     @staticmethod
     def _create_checksums_file(base_dir, checksums=None):

@@ -24,7 +24,11 @@ class TestIntegrationDDS(BaseIntegration):
             self._create_checksums_file(tmp_dir)
 
             url = "/".join([self.API_BASE, "stage", "runfolder", dir_name])
-            response = yield self.http_client.fetch(self.get_url(url), method='POST', body='')
+            response = yield self.http_client.fetch(
+                    self.get_url(url),
+                    method='POST',
+                    body='',
+                    )
             self.assertEqual(response.code, 202)
 
             response_json = json.loads(response.body)
@@ -36,17 +40,25 @@ class TestIntegrationDDS(BaseIntegration):
                 self.assertEqual(project, "ABC_123")
 
                 status_response = yield self.http_client.fetch(link)
-                self.assertEqual(json.loads(status_response.body)["status"], StagingStatus.staging_successful.name)
+                self.assertEqual(
+                        json.loads(status_response.body)["status"],
+                        StagingStatus.staging_successful.name)
 
                 # The size of the fake project is 1024 bytes
                 status_response = yield self.http_client.fetch(link)
-                self.assertEqual(json.loads(status_response.body)["size"], 1024)
+                self.assertEqual(
+                        json.loads(status_response.body)["size"], 1024)
 
-            staging_order_project_and_id = response_json.get("staging_order_ids")
+            staging_order_project_and_id = response_json.get(
+                    "staging_order_ids")
 
             for project, staging_id in staging_order_project_and_id.items():
                 self.assertTrue(os.path.exists(f"/tmp/{staging_id}/{project}"))
-                delivery_url = '/'.join([self.API_BASE, 'deliver', 'stage_id', str(staging_id)])
+                self.assertFalse(os.path.exists(
+                    f"/tmp/{staging_id}/{project}/"
+                    f"{os.path.basename(tmp_dir)}/Raw_Data"))
+                delivery_url = '/'.join([
+                    self.API_BASE, 'deliver', 'stage_id', str(staging_id)])
                 delivery_body = {
                         'delivery_project_id': 'snpseq00025',
                         'ngi_project_name': 'AB-1234',
@@ -61,7 +73,9 @@ class TestIntegrationDDS(BaseIntegration):
                 delivery_link = delivery_resp_as_json['delivery_order_link']
 
                 status_response = yield self.http_client.fetch(delivery_link)
-                self.assertEqual(json.loads(status_response.body)["status"], DeliveryStatus.delivery_skipped.name)
+                self.assertEqual(
+                        json.loads(status_response.body)["status"],
+                        DeliveryStatus.delivery_skipped.name)
 
     @gen_test
     def test_can_stage_and_delivery_project_dir(self):

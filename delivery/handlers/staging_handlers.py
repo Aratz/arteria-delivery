@@ -6,7 +6,8 @@ from tornado.gen import coroutine
 from arteria.web.handlers import BaseRestHandler
 
 from delivery.handlers import *
-from delivery.exceptions import ProjectNotFoundException,ProjectAlreadyDeliveredException
+from delivery.exceptions import ProjectNotFoundException, \
+        ProjectAlreadyDeliveredException, ForbiddenException
 
 from delivery.models.delivery_modes import DeliveryMode
 
@@ -43,11 +44,14 @@ class StagingProjectRunfoldersHandler(BaseStagingHandler):
     @coroutine
     def post(self, project_id):
         """
-        This endpoint allows all runfolders for a specific project to be staged. Depending on which `delivery_mode`
-        is specified different behaviour will be exhibited. The possible modes are CLEAN, BATCH and FORCE. If CLEAN
-        is specified the staging will only be allowed if the project has not been delivered before. If BATCH is
-        specified, any runfolders which have not previously been staged will be staged. If FORCE is specified all
-        runfolders will, regardless of their current status, be staged together.
+        This endpoint allows all runfolders for a specific project to be
+        staged. Depending on which `delivery_mode` is specified different
+        behaviour will be exhibited. The possible modes are CLEAN, BATCH and
+        FORCE. If CLEAN is specified the staging will only be allowed if the
+        project has not been delivered before. If BATCH is specified, any
+        runfolders which have not previously been staged will be staged. If
+        FORCE is specified all runfolders will, regardless of their current
+        status, be staged together.
 
         Here is a python code example of how to call the endpoint.
 
@@ -77,34 +81,60 @@ class StagingProjectRunfoldersHandler(BaseStagingHandler):
             request_data = {}
 
         requested_delivery_mode = request_data.get("delivery_mode", None)
+        include_bcl = request_data.get("include_bcl", False)
+
         try:
             delivery_mode = DeliveryMode[requested_delivery_mode]
-            log.info("Will attempt to stage runfolders for project {} with type {}".format(project_id, delivery_mode))
+            log.info(
+                "Will attempt to stage runfolders"
+                " for project {} with type {}".format(
+                    project_id, delivery_mode))
 
-            project_and_stage_id, projects = self.delivery_service.deliver_all_runfolders_for_project(project_id, delivery_mode)
-            links, staging_ids_ids = self._construct_response_from_project_and_status(project_and_stage_id)
-            project_and_staged_id_dict = list(map(lambda project: project.to_dict(), projects))
+            project_and_stage_id, projects = self.delivery_service \
+                .deliver_all_runfolders_for_project(
+                        project_id,
+                        delivery_mode,
+                        include_bcl=include_bcl)
+
+            links, staging_ids_ids = self \
+                ._construct_response_from_project_and_status(
+                        project_and_stage_id)
+
+            project_and_staged_id_dict = [
+                    project.to_dict()
+                    for project in projects]
 
             self.set_status(ACCEPTED)
-            self.write_json({'staging_order_links': links,
-                             'staging_order_ids': staging_ids_ids,
-                             'staged_data': project_and_staged_id_dict})
+            self.write_json({
+                'staging_order_links': links,
+                'staging_order_ids': staging_ids_ids,
+                'staged_data': project_and_staged_id_dict})
+
         except ProjectNotFoundException as e:
-            log.warning("Request issued for non-existent project {}".format(project_id))
+            log.warning("Request issued for non-existent project {}".format(
+                project_id))
             self.set_status(NOT_FOUND, reason=e.msg)
-        except ProjectAlreadyDeliveredException as e:
-            log.warning("Project: {} has already been delivered, and is not compatible "
-                        "with delivery mode: {}".format(project_id, delivery_mode))
-            self.set_status(FORBIDDEN,
-                            reason="This project has already been delivered! Maybe you want to deliver in BATCH mode "
-                                   "instead? Or if that is not the case you will need to force the delivery with "
-                                   "FORCE")
-        except KeyError as e:
+        except ProjectAlreadyDeliveredException:
+            log.warning(
+                "Project: {} has already been delivered, and is not compatible"
+                " with delivery mode: {}".format(project_id, delivery_mode))
+            self.set_status(
+                FORBIDDEN,
+                reason="This project has already been delivered!"
+                " Maybe you want to deliver in BATCH mode instead?"
+                " Or if that is not the case you will need to"
+                " force the delivery with FORCE")
+        except KeyError:
             log.warning("A non-valid delivery mode was requested: {}."
                         " Will deny request.".format(requested_delivery_mode))
-            self.set_status(FORBIDDEN,
-                            reason="Delivery mode: {} was not permitted. Only: {} are valid stated".format(
-                                requested_delivery_mode, [m.value for m in DeliveryMode]))
+            self.set_status(
+                    FORBIDDEN,
+                    reason="Delivery mode: {} was not permitted."
+                    " Only: {} are valid stated".format(
+                        requested_delivery_mode,
+                        [m.value for m in DeliveryMode]))
+        except ForbiddenException as e:
+            self.set_status(FORBIDDEN, reason=str(e))
 
 
 class StagingRunfolderHandler(BaseStagingHandler):
